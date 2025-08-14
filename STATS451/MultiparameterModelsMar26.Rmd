@@ -1,0 +1,281 @@
+---
+title: "MultiparameterModels"
+output: html_document
+---
+
+## Create histograms or contours of posteriors
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+library(tidyr)
+# one dim example
+logpost <- function(x) {dnorm(x, 1, 0.8, log = TRUE)}
+# create grid
+xseq <- seq(-3, 5, length.out = 1000)
+lp <- logpost(xseq)
+postden <- exp(lp - max(lp))
+plot(xseq, postden)
+```
+
+```{r}
+# sample from density
+idx <- sample(1:length((xseq)), size = 1000, replace = TRUE, prob = postden/sum(postden))
+hist(xseq[idx], 20, freq = FALSE, main = '', xlab = '')
+lines(xseq, postden/(sum(postden) * (xseq[2]-xseq[1])), col = 'red')
+```
+
+
+```{r}
+# 2 dim example
+Nx = 20
+Ny = 20
+logpost2d <- function(x) {-(x[1]-3)^2 * x[2]^2 - (x[1])^2 /10 - x[2]^2}
+x1seq <- seq(-5, 6, length.out = Nx)
+x2seq <- seq(-2, 2, length.out = Ny)
+x12seq <- expand.grid(x1seq, x2seq)
+x1seq <- x12seq[, 1]
+x2seq <- x12seq[, 2]
+zval <- apply(x12seq, 1, logpost2d)
+zval <- exp(zval - max(zval))
+ggplot(data = data.frame(x1seq ,x2seq, zval), aes(x = x1seq, y = x2seq)) +
+  geom_raster(aes(fill = zval, alpha = zval), interpolate = T) +
+  geom_contour(aes(z = zval), colour = 'black', size = 0.2) +
+  labs(x = '', y = '') +
+  scale_fill_gradient(low = 'yellow', high = 'red', guide = F) +
+  scale_alpha(range = c(0, 1), guide = F)
+```
+
+
+```{r}
+
+logpost2d <- function(x, y) {-(x-3)^2 * y^2 - (x)^2 /10 - y^2}
+x1seq <- seq(-5, 6, length.out = Nx)
+x2seq <- seq(-2, 2, length.out = Ny)
+zout <- outer(x1seq, x2seq, logpost2d)
+zout <- exp(zout - max(zout))
+par(mfrow = c(1, 3))
+persp(x = x1seq, y = x2seq, z = zout, theta = 0, phi = 30)
+persp(x = x1seq, y = x2seq, z = zout, theta = 30, phi = 60)
+persp(x = x1seq, y = x2seq, z = zout, theta = 60, phi = 90)
+```
+
+```{r}
+# random samples
+idx <- sample(1:dim(x12seq)[1], size = 1000, replace = TRUE, prob = zval/sum(zval))
+samples2d <- x12seq[idx, ]
+par(mfrow = c(1, 2))
+hist(samples2d[, 1], main = '', xlab = '', ylab = '')
+hist(samples2d[, 2], main = '', xlab = '', ylab = '')
+```
+
+
+## Bioassay example
+
+```{r}
+# Bayesian data analysis
+# Aki Vehtari <Aki.Vehtari@aalto.fi>
+# Markus Paasiniemi <Markus.Paasiniemi@aalto.fi>
+library(ggplot2)
+library(gridExtra)
+library(tidyr)
+# Bioassay data, (BDA3 page 86)
+df1 <- data.frame(
+  x = c(-0.86, -0.30, -0.05, 0.73),
+  n = c(5, 5, 5, 5),
+  y = c(0, 1, 3, 5)
+)
+```
+
+# Fit GLM
+```{r}
+library(MASS)
+x = c()
+y = c()
+for(k in 1:length(df1$n)){
+    x <- c(x, rep(df1$x[k], df1$n[k]))
+    y <- c(y, c(rep(1, df1$y[k]), rep(0, df1$n[k] - df1$y[k])))
+}
+datalogit <- data.frame(x = x, y = y)
+glmresult = glm(y~x,family=binomial(link='logit'),data=datalogit)
+print(summary(glmresult))
+meanalphabeta = as.numeric(glmresult$coefficients)
+varmeanalphabeta = as.matrix(vcov(glmresult))
+samplesglm = mvrnorm(1000, meanalphabeta, varmeanalphabeta)
+plot(samplesglm, pch = 9, xlab = 'alpha', ylab = 'beta', cex = 0.1, ylim = c(-10, 40), xlim = c(-4, 10))
+```
+
+
+## Normal approximaton for Bioassay model.
+
+```{r}
+
+# compute the posterior density in grid
+#  - usually should be computed in logarithms!
+#  - with alternative prior, check that range and spacing of A and B
+#    are sensible
+
+A = seq(-4, 8, length.out = 100)
+B = seq(-10, 40, length.out = 100)
+
+# make vectors that contain all pairwise combinations of A and B
+cA <- rep(A, each = length(B))
+cB <- rep(B, length(A))
+
+# a helper function to calculate the log likelihood
+logl <- function(df, a, b)
+  df['y']*(a + b*df['x']) - df['n']*log1p(exp(a + b*df['x']))
+
+# calculate likelihoods: apply logl function for each observation
+# ie. each row of data frame of x, n and y
+p <- apply(df1, 1, logl, cA, cB) %>% rowSums() %>% exp()
+```
+
+# create a plot of the posterior density
+
+```{r}
+
+# limits for the plots
+xl <- c(-2, 8)
+yl <- c(-10, 40)
+
+pos <- ggplot(data = data.frame(cA ,cB, p), aes(x = cA, y = cB)) +
+  geom_raster(aes(fill = p, alpha = p), interpolate = T) +
+  geom_contour(aes(z = p), colour = 'black', size = 0.2) +
+  coord_cartesian(xlim = xl, ylim = yl) +
+  labs(x = 'alpha', y = 'beta') +
+  scale_fill_gradient(low = 'yellow', high = 'red', guide = F) +
+  scale_alpha(range = c(0, 1), guide = F)
+pos
+```
+
+# sample from the grid (with replacement)
+```{r}
+nsamp <- 1000
+samp_indices <- sample(length(p), size = nsamp,
+                       replace = T, prob = p/sum(p))
+
+samp_A <- cA[samp_indices[1:nsamp]]
+samp_B <- cB[samp_indices[1:nsamp]]
+# add random jitter, see BDA3 p. 76
+samp_A <- samp_A + runif(nsamp, A[1] - A[2], A[2] - A[1])
+samp_B <- samp_B + runif(nsamp, B[1] - B[2], B[2] - B[1])
+
+# samples of LD50 conditional beta > 0
+bpi <- samp_B > 0
+samp_ld50 <- -samp_A[bpi]/samp_B[bpi]
+
+# plot of the samples
+sam <- ggplot(data = data.frame(samp_A, samp_B)) +
+  geom_point(aes(samp_A, samp_B), color = 'blue', size = 0.3) +
+  coord_cartesian(xlim = xl, ylim = yl) +
+  labs(x = 'alpha', y = 'beta')
+
+sam
+```
+
+
+
+# plot of the histogram of LD50
+```{r}
+
+his <- ggplot() +
+  geom_histogram(aes(samp_ld50), binwidth = 0.04,
+                 fill = 'steelblue', color = 'black') +
+  coord_cartesian(xlim = c(-0.5, 0.5)) +
+  labs(x = 'LD50 = -alpha/beta')
+
+his
+```
+
+
+## Normal approximation
+```{r}
+# define the function to be optimized
+bioassayfun <- function(w, df) {
+  z <- w[1] + w[2]*df$x
+  -sum(df$y*(z) - df$n*log1p(exp(z)))
+}
+
+
+# initial guess
+w0 <- c(0,0)
+optim_res <- optim(w0, bioassayfun, gr = NULL, df1, hessian = T)
+w <- optim_res$par
+S <- solve(optim_res$hessian)
+
+# multivariate normal probability density function
+dmvnorm <- function(x, mu, sig)
+  exp(-0.5*(length(x)*log(2*pi) + log(det(sig)) + (x-mu)%*%solve(sig, x-mu)))
+
+# evaluate likelihood at points (cA,cB)
+p <- apply(cbind(cA, cB), 1, dmvnorm, w, S)
+
+# sample from the grid (with replacement)
+nsamp <- 1000
+samp_indices <- sample(length(p), size = nsamp,
+                       replace = T, prob = p/sum(p))
+
+samp_A <- cA[samp_indices[1:nsamp]]
+samp_B <- cB[samp_indices[1:nsamp]]
+# add random jitter, see BDA3 p. 76
+samp_A <- samp_A + runif(nsamp, A[1] - A[2], A[2] - A[1])
+samp_B <- samp_B + runif(nsamp, B[1] - B[2], B[2] - B[1])
+
+# samples of LD50 conditional beta > 0
+# Normal approximation does not take into account that the posterior
+# is not symmetric and that there is very low density for negative
+# beta values. Based on the draws from the normal approximation
+# is is estimated that there is about 6% probability that beta is negative!
+bpi <- samp_B > 0
+samp_ld50 <- -samp_A[bpi]/samp_B[bpi]
+
+
+# create a plot of the posterior density
+pos_norm <- ggplot(data = data.frame(cA ,cB, p), aes(x = cA, y = cB)) +
+  geom_raster(aes(fill = p, alpha = p), interpolate = T) +
+  geom_contour(aes(z = p), colour = 'black', size = 0.2) +
+  coord_cartesian(xlim = xl, ylim = yl) +
+  labs(x = 'alpha', y = 'beta') +
+  scale_fill_gradient(low = 'yellow', high = 'red', guide = F) +
+  scale_alpha(range = c(0, 1), guide = F)
+
+pos_norm
+```
+
+
+
+
+# plot of the samples
+
+```{r}
+
+sam_norm <- ggplot(data = data.frame(samp_A, samp_B)) +
+  geom_point(aes(samp_A, samp_B), color = 'blue', size = 0.3) +
+  coord_cartesian(xlim = xl, ylim = yl) +
+  labs(x = 'alpha', y = 'beta')
+
+sam_norm
+```
+
+
+# plot of the histogram of LD50
+```{r}
+
+his_norm <- ggplot() +
+  geom_histogram(aes(samp_ld50), binwidth = 0.04,
+                 fill = 'steelblue', color = 'black') +
+  coord_cartesian(xlim = c(-0.5, 0.5)) +
+  labs(x = 'LD50 = -alpha/beta, beta > 0')
+
+his_norm
+```
+
+# combine the plots
+```{r}
+grid.arrange(pos, sam, his, pos_norm, sam_norm, his_norm, ncol = 3)
+
+```
+
+
+

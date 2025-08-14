@@ -1,0 +1,91 @@
+---
+title: "proj_model"
+author: "SIYANG Wu"
+date: "2024-04-20"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rstan)
+```
+
+
+```{r}
+data = read.csv("state_brith_rate.csv")
+data <- data[, colnames(data) %in% c("GEOID", "Births", "year", "Population")]
+
+data_2016 = data[data$year == 2016, ]
+
+stan_data = list(n_subj = nrow(data_2016), n_cat = 50, N = data_2016$Population, z = data_2016$Births * 10, c = as.numeric(factor(data_2016$GEOID)))
+
+
+
+```
+
+
+
+# Problem 4
+
+
+```{r}
+model = "data {
+  int<lower=1> n_subj;
+  int<lower=1> n_cat;
+  int<lower=0> z[n_subj];
+  int<lower=0> c[n_subj];
+  int<lower=0> N[n_subj];
+}
+parameters {
+  vector<lower=0,upper=1>[n_subj] theta; // individual prob correct
+  vector<lower=0,upper=1>[n_cat] omega;   // group mode
+  vector<lower=0>[n_cat] kappa_minus_two; // group concentration minus two
+  real<lower=0> kappa_minus_twoO; 
+  real<lower=0,upper=1> omegaO;
+}
+transformed parameters {
+  real<lower=0> kappaO;  
+  vector<lower=0>[n_cat] kappa;  
+
+  kappaO = kappa_minus_twoO + 2;
+  kappa = kappa_minus_two + 2;
+}
+model {
+
+  omegaO ~ beta(1.0, 1.0);
+
+  kappa_minus_twoO ~ gamma(0.01, 0.01);
+
+
+  omega ~ beta(omegaO * (kappaO - 2) + 1, (1 - omegaO) * (kappaO - 2) + 1);
+  kappa_minus_two ~ gamma(0.01, 0.01);
+
+  z ~ binomial(N, theta);
+  theta ~ beta(omega[c] .* (kappa[c] - 2) + 1, 
+               (1 - omega[c]) .* (kappa[c] - 2) + 1); 
+}
+"
+sm <- stan_model(model_code = model)
+```
+
+# Problem 5
+
+
+```{r}
+warmup = 1000
+fit <- sampling(sm, data = stan_data, iter = 2000, chains = 8,warmup = 500, cores = 8)
+
+print(fit, pars = paste0("theta[", 1:70, "]"), digit = 4)
+```
+
+
+```{r}
+print(fit, pars = 'omega', digit = 4)
+
+```
+
+```{r}
+la = extract(fit)
+
+hist(la$theta[,1])
+```

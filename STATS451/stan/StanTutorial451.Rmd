@@ -1,0 +1,376 @@
+---
+title: "StanTutorial"
+output: html_document
+---
+
+Loading the package
+
+The package name is rstan (all lowercase), so we can use library("rstan") to load the package.
+```{r}
+#install.packages("rstan")
+library(rstan) # observe startup messages
+```
+
+As the startup message says, if you are using rstan locally on a multicore machine and have plenty of RAM to estimate your model in parallel, at this point execute
+
+```{r}
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+```
+
+These options respectively allow you to automatically save a bare version of a compiled Stan program to the hard disk so that it does not need to be recompiled and to execute multiple Markov chains in parallel.
+
+
+##References
+
+Gelman, A., Carlin, J. B., Stern, H. S., and Rubin, D. B. (2003). Bayesian Data Analysis, CRC Press, London, 2nd Edition.
+
+Stan Development Team. Stan Modeling Language User's Guide and Reference Manual.
+
+Gelfand, A. E., Hills S. E., Racine-Poon, A., and Smith A. F. M. (1990). "Illustration of 
+
+Bayesian Inference in Normal Data Models Using Gibbs Sampling", Journal of the American Statistical Association, 85, 972-985.
+
+## Tutorials: 
+
+https://cran.r-project.org/web/packages/rstan/vignettes/rstan.html
+
+http://sumsar.net/files/posts/2017-01-15-bayesian-computation-with-stan-and-farmer-jons/stan_exercise.html
+
+## Examples
+
+And we can get a fit with the following R command. Note that the argument to file = should point to where the file is on your file system unless you have put it in the working directory of R in which case the below will work.
+```{r}
+# i.i.d. Bernoulli
+y2 <- rbinom(20, 1, 0.4)
+fit <- stan(file = 'Bernoulli.stan', 
+            data = list(N = length(y2), y = y2),
+            iter = 1000, chains = 4)
+print(fit)
+samples_theta <-  rstan::extract(fit)
+plot(samples_theta$theta, type = "l")
+hist(samples_theta$theta)
+plot(fit)
+```
+
+We can also specify a Stan model using a character string by using argument model_code of function stan instead. However, this is not recommended, as using a file allows you to use print statements and to dereference line numbers in error messages.
+
+The object fit, returned from function stan is an S4 object of class stanfit. Methods such as print, plot, and pairs are associated with the fitted result so we can use the following code to check out the results in fit. print provides a summary for the parameter of the model as well as the log-posterior with name lp__ (see the following example output). For more methods and details of class stanfit, see the help of class stanfit.
+
+In particular, we can use extract function on stanfit objects to obtain the samples. extract extracts samples from the stanfit object as a list of arrays for parameters of interest, or just an array. In addition, S3 functions as.array, as.matrix, and as.data.frame are defined for stanfit object (using help("as.array.stanfit") to check out the help document in R).
+
+
+```{r}
+# i.i.d. Bernoulli
+bernoulli_code <- "
+  data { 
+    int<lower=0> N; 
+    int<lower=0,upper=1> y[N];
+  } 
+  parameters {
+    real<lower=0,upper=1> theta;
+  } 
+  model {
+    theta ~ beta(1,1);
+    for (n in 1:N) 
+      y[n] ~ bernoulli(theta);
+    }
+"
+sm <- stan_model(model_code = bernoulli_code)
+y2 <- rbinom(20, 1, 0.4)
+fit <- sampling(sm, data = list(N = 20, y = y2))
+print(fit)
+plot(fit)
+```
+More details about RStan can be found in the documentation including the vignette of package rstan. For example, using help(stan) and help("stanfit-class") to check out the help for function stan and S4 class stanfit.
+And see Stan's modeling language manual for details about Stan's samplers, optimizers, and the Stan modeling language.
+
+In addition, the Stan User's Mailing list can be used to discuss the use of Stan, post examples or ask questions about (R)Stan. When help is needed, it is important to provide enough information such as the following:
+
+model code in Stan modeling language
+data
+necessary R code
+dump of error message using verbose=TRUE and cores=1 when calling the stan function
+version of the C++ compiler, for example, using g++ -v to obtain this if gcc is used
+information about R by using function sessionInfo() in R
+
+
+```{r}
+# i.i.d. Gaussian
+ocode <- "
+  data {
+    int<lower=1> N;
+    real y[N];
+  } 
+  parameters {
+    real mu;
+  } 
+  model {
+    target += normal_lpdf(y | mu, 1);
+  } 
+"
+sm <- stan_model(model_code = ocode)
+y2 <- rnorm(20)
+fit <- sampling(sm, data = list(N = 20, y = y2))
+summary(fit)
+samples_fit <- extract(fit)
+```
+
+
+```{r}
+# Two coins
+model_string <- "
+data {
+
+  int n1;
+  int n2;
+  
+  int y1[n1];
+  int y2[n2];
+}
+
+parameters {
+  real<lower=0, upper=1> theta1;
+  real<lower=0, upper=1> theta2;
+}
+
+model {  
+  theta1 ~ beta(1, 1);
+  theta2 ~ beta(1, 1);
+  y1 ~ bernoulli(theta1);
+  y2 ~ bernoulli(theta2); 
+}
+
+"
+
+y1 <- c(0, 1, 0, 0, 0, 0, 1, 0, 0, 0)
+y2 <- c(0, 0, 1, 1, 1, 0, 1, 1, 1, 0)
+data_list <- list(y1 = y1, y2 = y2, n1 = length(y1), n2 = length(y2))
+
+# Compiling and producing posterior samples from the model.
+stan_samples <- stan(model_code = model_string, data = data_list)
+
+# Plotting and summarizing the posterior distribution
+stan_samples
+plot(stan_samples)
+```
+
+# Practice Problem
+Farmer Jons has a huge number of cows. Earlier this year he ran an experiment where he gave 10 cows medicine A and 10 medicine B and then measured whether they got sick (0) or not (1) during the summer season. Here is the resulting data:
+
+```{r}
+cowA <- c(0, 1, 0, 0, 0, 0, 1, 0, 0, 0)
+cowB <- c(0, 0, 1, 1, 1, 0, 1, 1, 1, 0)
+```
+
+Jons now wants to know: How effective are the drugs? What is the evidence that medicine A is better or worse than medicine B?
+
+
+Farmer Jons has a huge number of cows. Earlier this year he ran an experiment where he gave 10 cows a special diet that he had heard could make them produce more milk. He recorded the number of liters of milk from these “diet” cows and from 15 “normal” cows during one month. This is the data:
+
+```{r}
+
+diet_milk <- c(651, 679, 374, 601, 401, 609, 767, 709, 704, 679)
+normal_milk <- c(798, 1139, 529, 609, 553, 743, 151, 544, 488, 555, 257, 692, 678, 675, 538)
+
+```
+
+Jons now wants to know: Was the diet any good, does it results in better milk production?
+
+```{r}
+
+
+model_string <- "
+data {
+  int<lower=0> n1;
+  int<lower=0> n2;
+  real y1[n1];
+  real y2[n2];
+}
+
+parameters {
+  real mu1;
+  real<lower=0> sigma1;
+  real mu2;
+  real<lower=0> sigma2;
+}
+
+model {  
+  for(i in 1:n1 ) {
+    y1[i] ~ normal(mu1, sigma1);
+  }
+  for(i in 1:n2 ) {
+    y2[i] ~ normal(mu2, sigma2);
+  }
+}
+
+generated quantities {
+}
+"
+data_milk = list(n1 = length(diet_milk), y1 = diet_milk, n2 = length(normal_milk), y2 = normal_milk)
+stan_samples <- stan(model_code = model_string, data = data_milk)
+
+# Plotting and summarizing the posterior distribution
+stan_samples
+plot(stan_samples)
+```
+
+
+He also has chickens. He tries different diets on them too with the hope that they will produce more eggs. Below is the number of eggs produced in one week by chickens on a diet and chickens eating normal chicken stuff:
+```{r}
+
+diet_eggs <- c(6, 4, 2, 3, 4, 3, 0, 4, 0, 6, 3)
+normal_eggs <- c(4, 2, 1, 1, 2, 1, 2, 1, 3, 2, 1)
+```
+
+
+Jons now wants to know: Was the diet any good, does it result in the chickens producing more eggs?
+
+```{r}
+
+model_string <- "
+data {
+  int<lower=0> n1;
+  int<lower=0> n2;
+  int y1[n1];
+  int y2[n2];
+}
+
+parameters {
+  real<lower=0> lambda1;
+  real<lower=0> lambda2;
+}
+
+model {  
+  for(i in 1:n1 ) {
+    y1[i] ~ poisson(lambda1);
+  }
+  for(i in 1:n2 ) {
+    y2[i] ~ poisson(lambda2);
+  }
+}
+
+generated quantities {
+}
+"
+data_eggs = list(n1 = length(diet_eggs), y1 = diet_eggs, n2 = length(normal_eggs), y2 = normal_eggs)
+stan_samples <- stan(model_code = model_string, data = data_eggs)
+
+# Plotting and summarizing the posterior distribution
+stan_samples
+plot(stan_samples)
+```
+
+
+Farmer Jons has a huge number of cows. He is wondering whether the amount of time a cow spends outside in the sunshine affects how much milk she produces. To test this he makes a controlled experiment where he picks out 20 cows and assigns each a number of hours she should spend outside each day. The experiment runs for a month and Jöns records the number of liters of milk each cow produces. Copy-n-paste the following into R and inspect the resulting data frame d.
+
+```{r}
+d <- data.frame(milk = c(685, 691, 476, 1151, 879, 725, 1190, 1107, 809, 539,
+                         298, 805, 820, 498, 1026, 1217, 1177, 684, 1061, 834),
+                hours = c(3, 7, 6, 10, 6, 5, 10, 11, 9, 3, 6, 6, 3, 5, 8, 11, 
+                          12, 9, 5, 5))
+```
+
+
+Using this data on hours of sunshine and resulting liters of milk Jons wants to know: Does sunshine affect milk production positively or negatively?
+
+```{r}
+
+model_string <- "
+data {
+  int<lower=0> n;
+  real x[n];
+  real y[n];
+}
+
+parameters {
+  real<lower=0> beta0;
+  real<lower=0> beta1;
+  real<lower=0> sigma;
+}
+
+model {  
+  for(i in 1:n ) {
+    y[i] ~ normal(beta0 + beta1 * x[i], sigma);
+  }
+}
+
+generated quantities {
+}
+"
+data_cows = list(n = length(d$milk), y = d$milk, x = d$hours)
+stan_samples <- stan(model_code = model_string, data = data_cows)
+
+# Plotting and summarizing the posterior distribution
+stan_samples
+plot(stan_samples)
+```
+
+
+Example: Eight Schools
+
+This is an example in Section 5.5 of Gelman et al (2003), which studied coaching effects from eight schools. For simplicity, we call this example "eight schools."
+
+We start by writing a Stan program for the model and saving it in a new file 8schools.stan.
+
+
+In this model, we let theta be transformed parameters of mu and eta instead of directly declaring theta as parameters. By parameterizing this way, the sampler will run more efficiently (see detailed explanation). We can prepare the data in R with:
+```{r}
+
+schools_dat <- list(J = 8, 
+                    y = c(28,  8, -3,  7, -1,  1, 18, 12),
+                    sigma = c(15, 10, 16, 11,  9, 11, 10, 18))
+```
+
+And we can get a fit with the following R command. Note that the argument to file = should point to where the file is on your file system unless you have put it in the working directory of R in which case the below will work.
+```{r}
+
+fit <- stan(file = '8schools.stan', data = schools_dat, 
+            iter = 1000, chains = 4)
+```
+
+We can also specify a Stan model using a character string by using argument model_code of function stan instead. However, this is not recommended, as using a file allows you to use print statements and to dereference line numbers in error messages.
+
+The object fit, returned from function stan is an S4 object of class stanfit. Methods such as print, plot, and pairs are associated with the fitted result so we can use the following code to check out the results in fit. print provides a summary for the parameter of the model as well as the log-posterior with name lp__ (see the following example output). For more methods and details of class stanfit, see the help of class stanfit.
+
+In particular, we can use extract function on stanfit objects to obtain the samples. extract extracts samples from the stanfit object as a list of arrays for parameters of interest, or just an array. In addition, S3 functions as.array, as.matrix, and as.data.frame are defined for stanfit object (using help("as.array.stanfit") to check out the help document in R).
+```{r}
+print(fit)
+plot(fit)
+pairs(fit, pars = c("mu", "tau", "lp__"))
+
+la <- extract(fit, permuted = TRUE) # return a list of arrays 
+mu <- la$mu 
+
+### return an array of three dimensions: iterations, chains, parameters 
+a <- extract(fit, permuted = FALSE) 
+
+### use S3 functions on stanfit objects
+a2 <- as.array(fit)
+m <- as.matrix(fit)
+d <- as.data.frame(fit)
+print(fit, digits = 1)
+```
+
+
+In addition, as in BUGS (or JAGS), CmdStan (the command line interface to Stan) needs all the data to be in an R dump file. In the case we have this file, rstan provides function read_rdump to read all the data into an R list. For example, if we have a file named "8schools.rdump" that contains the following text in our working directory.
+```{r}
+J <- 8
+y <- c(28,  8, -3,  7, -1,  1, 18, 12)
+sigma <- c(15, 10, 16, 11,  9, 11, 10, 18)
+fit <- stan(file = '8schools.stan', iter = 1000, chains = 4)
+```
+
+
+
+More details about RStan can be found in the documentation including the vignette of package rstan. For example, using help(stan) and help("stanfit-class") to check out the help for function stan and S4 class stanfit.
+And see Stan's modeling language manual for details about Stan's samplers, optimizers, and the Stan modeling language.
+
+In addition, the Stan User's Mailing list can be used to discuss the use of Stan, post examples or ask questions about (R)Stan. When help is needed, it is important to provide enough information such as the following:
+
+model code in Stan modeling language
+data
+necessary R code
+dump of error message using verbose=TRUE and cores=1 when calling the stan function
+version of the C++ compiler, for example, using g++ -v to obtain this if gcc is used
+information about R by using function sessionInfo() in R

@@ -1,0 +1,116 @@
+---
+title: "STATS 451 Homework 1"
+author: "Yuzhou Peng"
+date: "2024-01-27"
+output:
+  html_document:
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(ggplot2)
+library(purrr)
+```
+
+# Problem 1
+```{r}
+sample_size_1 = c(10, 50, 100)
+```
+## (a)
+```{r}
+set.seed(127)
+
+par(mfrow = c(2, 2))
+for(i in sample_size_1){
+  sample_exp <- rexp(i, rate = 1)
+  sample_exp_range <- range(sample_exp)
+  sample_exp_step <- seq(0.1, 6, by = 0.01)
+  hist(sample_exp,
+       main = paste("Histogram of samples with size =", i),
+       freq = FALSE)
+  lines(sample_exp_step, dexp(sample_exp_step), col = "blue")
+  
+  
+}
+```
+
+
+## (b)
+### Law of Large Number
+```{r}
+set.seed(127)
+
+N <- 1000
+x_exp <- rexp(N, rate = 1)
+means_exp <- cumsum(x_exp) / (1:N)
+plot(1:N, means_exp,
+     ylab = "Cumulative mean",
+     xlab = "Index",
+     main = "Visualization of Law of Large Number")
+```
+
+
+### Central Limit Theorem
+```{r}
+set.seed(127)
+y_exp <- array(rexp(1000 * 1000, 1), c(1000, 1000))
+```
+
+```{r}
+hist(y_exp,
+     main = "Random samples from exponential distribution")
+hist(apply(y_exp, 1, mean),
+     xlab = "Column mean",
+     main = "Visualization of Central Limit Theorem")
+```
+
+\newpage
+
+# Problem 2
+## (a)
+$$
+\text{Let } p_i \text{ be the probability of having a quiz on i-th class, and } q_i \text{ be the binary random variable}\\
+\text{indicating whether the professor will have quiz on i-th class:}\\
+q_i = \begin{cases} 1, & \mbox{meaning having quiz on i-th class} \\ 0, & \mbox{meaning no quiz on i-th class} \end{cases}, \text{ and we have:}\\
+\begin{aligned}
+p_i \overset{\mathrm{iid}}{\sim}& Uniform(0,1)\\
+q_i|p_i {\sim}& Bernouli(p_i), \text{ suggesting } q_i \text{ is independent.}\\
+\end{aligned}\\
+\begin{aligned}
+\text{Thus, we have: } \mathbb{E}[\sum_{i = 1}^{40}q_i] =& \text{ } 40\mathbb{E}[q_i]\\
+=& \text{ } 40 \int_0^1\mathbb{E}(q_i, p_i = p)dp\\
+=& \text{ } 40 \int_0^1\mathbb{E}(q_i| p_i = p) * 1dp\\
+=& \text{ } 40 \int_0^1pdp\\
+=& \text{ } 20.\\
+Var[\sum_{i = 1}^{40}q_i] =& \text{ } 40Var[q_i]\\
+=& \text{ } 40(\mathbb{E}[q_i^2] - (\mathbb{E}[q_i])^2)\\
+=& \text{ } 40 (\int_0^1\mathbb{E}(q_i^2| p_i = p)dp - \frac{1}{4})\\
+=& \text{ } 40 (\int_0^1pdp - \frac{1}{4})\\
+=& \text{ } 10.\\
+s.d. =& \text{ } \sqrt{Var[\sum_{i = 1}^{40}q_i]} = \sqrt{10}.
+\end{aligned}
+$$
+
+
+## (b) Monte-Carlo simulation
+```{r}
+set.seed(127)
+quiz_time_sample <- c()
+for (i in 1:1000){
+  p_quiz <- runif(40)
+  q <- c()
+  for (j in p_quiz){
+    qj <- rbernoulli(n = 1, p = j)
+    q <- append(q, qj)
+  }
+  quiz_time_sample <- append(quiz_time_sample, sum(q))
+}
+mean(quiz_time_sample)
+sd(quiz_time_sample)
+```

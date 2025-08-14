@@ -1,0 +1,201 @@
+---
+title: "proj_model"
+author: "SIYANG Wu, Yuzhou Peng"
+date: "2024-04-20"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rstan)
+```
+
+
+```{r}
+data = read.csv("state_brith_rate.csv")
+data <- data[, colnames(data) %in% c("GEOID", "Births", "year", "Population")]
+
+data_2016 = data[data$year == 2016, ]
+
+stan_data = list(n_subj = nrow(data_2016), n_cat = 50, N = data_2016$Population, z = data_2016$Births * 10, c = as.numeric(factor(data_2016$GEOID)))
+
+
+
+```
+
+
+
+
+
+
+```{r}
+model = "data {
+  int<lower=1> n_subj;
+  int<lower=1> n_cat;
+  int<lower=0> z[n_subj];
+  int<lower=0> c[n_subj];
+  int<lower=0> N[n_subj];
+}
+parameters {
+  real<lower=0, upper=1> lambda[n_subj]; // birth rate of each county
+  real<lower=0, upper=1> omega[n_cat];   // group parameter
+  real<lower=0> kappa_minus_two[n_cat]; // group concentration minus two
+  real<lower=0> kappa_minus_two0; //hyper parameter
+  real<lower=0,upper=1> omega0; // hyper parameter
+}
+transformed parameters {
+  real<lower = 1> alpha0;
+  real<lower = 1> beta0;
+  real<lower = 1> alpha[n_cat];
+  real<lower = 1> beta[n_cat];
+  
+  alpha0 = omega0 * kappa_minus_two0 + 1;
+  beta0 = (1-omega0) * kappa_minus_two0 + 1;
+  
+  for (i in 1:n_cat){
+    alpha[i] = omega[i] * kappa_minus_two[i] + 1;
+    beta[i] = (1-omega[i]) * kappa_minus_two[i] + 1;
+  }
+}
+
+model {
+  omega0 ~ beta(1.0, 1.0);  
+
+  kappa_minus_two0 ~ gamma(0.01, 0.01); 
+
+  for (j in 1:n_cat){
+    omega[j] ~ beta(beta0, alpha0);  
+    kappa_minus_two[j] ~ gamma(0.01, 0.01);
+  }
+  
+  for (i in 1:n_subj){
+    lambda[i] ~ beta(alpha[c[i]], beta[c[i]]);
+  }
+  
+  for (k in 1:n_subj){
+    z[k] ~ poisson(N[k]*lambda[k]);
+  } 
+}
+
+"
+sm <- stan_model(model_code = model)
+```
+
+# Problem 5
+
+
+```{r}
+warmup = 1000
+fit <- sampling(sm, data = stan_data, iter = 2000, chains = 8,warmup = 500, cores = 8)
+
+
+```
+
+
+```{r}
+print(fit, pars = paste0("lambda[", 1:70, "]"), digit = 4)
+print(fit, pars = 'omega', digit = 4)
+plot(fit)
+```
+
+```{r}
+la = rstan::extract(fit)
+
+
+```
+
+Convergence Analysis
+```{r}
+plot(la$lambda[,1], type = "l", ylab = "lambda 1", main = "Trace plot of lambda 1 sampling")
+plot(la$omega[,1], type = "l", ylab = "omega 1", main = "Trace plot of omega 1 sampling")
+plot(la$kappa_minus_two[,1], type = "l", ylab = "kappa1 - 2", main = "Trace plot of kappa1 - 2 sampling")
+```
+
+```{r}
+pacific_id <- c(2, 53, 41, 6, 15)
+mountian_id <- c(30, 16, 56, 32, 49, 8, 4, 35)
+west_north_central_id <- c(38, 27, 46, 31, 19, 20, 29)
+west_south_central_id <- c(40, 5, 22, 48)
+east_north_central_id <- c(55, 26, 17, 18, 39)
+east_south_central_id <- c(21, 47, 28, 1)
+south_atlantic_id <- c(54, 24, 10, 11, 51, 37, 45, 13, 12)
+middle_atlantic_id <- c(36, 34, 42)
+new_england_id <- c(23, 50, 33, 25, 9, 44)
+```
+
+```{r}
+lambda_new_england_full <- la$lambda[,data_2016$GEOID %in% new_england_id]
+
+summary(lambda_new_england_full)
+```
+
+```{r}
+data_2016_new_england <- data_2016[data_2016$GEOID %in% new_england_id,]
+
+stan_data_new_england = list(n_subj = nrow(data_2016_new_england), n_cat = length(new_england_id), N = data_2016_new_england$Population, z = data_2016_new_england$Births * 10, c = as.numeric(factor(data_2016_new_england$GEOID)))
+
+```
+
+```{r}
+warmup = 1000
+fit_new_england <- sampling(sm, data = stan_data_new_england, iter = 1000, chains = 8,warmup = 500, cores = 8)
+```
+Comparison between full model and devision-based model
+```{r}
+la_new_england = rstan::extract(fit_new_england)
+lambda_new_england <- la_new_england$lambda
+
+hist(lambda_new_england[,11] - lambda_new_england_full[,11], xlim = c(-0.01, 0.01), main = "lambda difference between full model and division based model of Cumberland, ME", xlab = "Lambda difference")
+
+print("95% confidence interval of lambda difference")
+quantile(lambda_new_england[,11] - lambda_new_england_full[,11], c(0.025, 0.975))
+```
+Comparison between esitimated birth rate level in different states
+```{r}
+omega_j_sample <- la$omega
+
+# Extract omega for TX
+tx_index <- data_2016$GEOID == 48
+omega_tx_full <- omega_j_sample[,stan_data$c[tx_index]][,1]
+
+# Extract omega for CA
+ca_index <- data_2016$GEOID == 6
+omega_ca_full <- omega_j_sample[,stan_data$c[ca_index]][,1]
+
+# Extract omega for MA
+ma_index <- data_2016$GEOID == 25
+omega_ma_full <- omega_j_sample[,stan_data$c[ma_index]][,1]
+```
+
+```{r}
+hist(omega_tx_full, col = "purple", xlim = c(0.05, 0.15), main = "Histogram of omega for TX, CA and MA", xlab = "omega")
+hist(omeaga_ca_full, col = "blue", add = T)
+hist(omega_ma_full, col = "lightblue", add = T)
+legend("topright", legend=c("TX", "CA", "MA"), fill=c("purple", "blue", "lightblue"))
+```
+
+```{r}
+omega_diff_tx_ca <- omega_tx_full - omega_ca_full
+omega_diff_tx_ma <- omega_tx_full - omega_ma_full
+omega_diff_ca_ma <- omega_ca_full - omega_ma_full
+
+print("95% confidence interval of Omega difference between TX and CA")
+quantile(omega_diff_tx_ca, c(0.025, 0.975))
+print("95% confidence interval of Omega difference between TX and MA")
+quantile(omega_diff_tx_ma, c(0.025, 0.975))
+print("95% confidence interval of Omega difference between CA and MA")
+quantile(omega_diff_ca_ma, c(0.025, 0.975))
+
+
+```
+
+```{r}
+
+mean(la$omega0)
+summary(la$omega0)
+
+mean(la$alpha0/(la$alpha0 + la$beta0))
+```
+
+
+

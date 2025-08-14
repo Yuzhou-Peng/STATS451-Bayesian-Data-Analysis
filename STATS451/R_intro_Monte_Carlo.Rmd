@@ -1,0 +1,270 @@
+---
+title: "R_intro_Monte_Carlo"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# play with a sequence
+
+```{r}
+A_vector = rep(NA, 1001)
+A_vector[1] = 1
+A_vector[2] = 1
+for(n in 2:1000){
+  A_vector[n+1] = 2 * A_vector[n] + A_vector[n-1]
+}
+A_vector[201]
+A_vector[901]
+```
+
+# how to work this out on log scale to avoid "Inf"
+
+
+```{r}
+
+log_A_vector = rep(NA, 1001)
+log_A_vector[1] = 0
+log_A_vector[2] = 0
+for(n in 2:1000){
+  temp <- max(log_A_vector[n-1], log_A_vector[n])
+  log_A_vector[n+1] = temp + log(2 * exp(log_A_vector[n] - temp) + exp(log_A_vector[n-1] - temp))
+}
+
+log_A_vector[201]
+log_A_vector[901]
+
+```
+
+# Vector and Matrix operations
+
+
+```{r}
+x <- c(1,2,3,5)
+y <- c(3,5,7,6)
+x+y
+x*y
+x%*%t(y)
+x * 4
+x^2
+```
+# R list (data frame)
+
+```{r}
+my_list <- list(First_class = c(1, 2, 3, 4, 4, 4), 
+                Second_class = matrix(1:4, 2, 2),
+                last_element = 2.4,
+                words = c("i", "love", "statistics"))
+my_list$First_class
+names(my_list)
+```
+
+
+# sample random variables
+
+```{r}
+# Coin flip
+
+p <- 0.7
+my_coin_flips <- rbinom(100, 1, p)
+
+# simulate a Bernoulli random variable 
+
+p <- 0.7
+y <- rbinom(100000, 1, p)
+table(y)
+
+```
+
+```{r}
+# estimate moment
+phat <- sum(y)/length(y)
+print(c(phat, mean(y)))
+print(c(phat*(1-phat), var(y)))
+```
+
+# uniform distribution
+
+
+```{r}
+
+x <- runif(1000, pi, 2*pi)
+mean(x)
+
+# true value of the mean
+(3*pi)/2
+
+# do it for multiple sample sizes
+
+for(size in c(10, 100, 1000, 1000000)) {
+  my_vals = runif(size, min = pi, max = 2*pi)
+  print(size)
+  print(mean(my_vals))
+  print(var(my_vals))
+}
+
+# equivalent way of simulating bernoulli experiments
+x <- runif(10000, 0, 1)
+y <- (x < p)
+table(as.integer(x < p))
+
+```
+
+# what if the coin is biased with head prob. = 0.4?
+
+
+# Gaussian r.v.s N(0, 1)
+
+
+```{r}
+
+my_simulation <- list(ten_samples = rnorm(10),
+                      twen_samp = rnorm(20), 
+                      fiftysample = rnorm(50),
+                      hundredsamp = rnorm(100), 
+                      thousampl = rnorm(1000),
+                      millionsampl = rnorm(1000000))
+
+sapply(my_simulation, mean)
+sapply(my_simulation, var)
+
+# recover density using Monte Carlo Samples
+
+par(mfrow = c(2, 3))
+hist(my_simulation$ten_samples)
+hist(my_simulation$twen_samp)
+hist(my_simulation$fiftysample)
+hist(my_simulation$hundredsamp)
+hist(my_simulation$thousampl)
+
+# Compute Expectation and Variance of r.v.s using Monte Carlo
+
+print(mean(my_simulation$ten_samples))
+
+par(mfrow = c(2, 3))
+Nsamples_vec <- c(10, 20, 50, 100, 1000, 2000, 5000)
+for(k in Nsamples_vec){
+  mysamples <- rnorm(k)
+  hist(mysamples)
+}
+```
+
+```{r}
+Nsamples <- 50
+x <- rnorm(Nsamples)
+hist(x)
+boxplot(x)
+xrange <- range(x)
+xsteps <- seq(xrange[1], xrange[2], length.out = 100)
+density_x <- dnorm(xsteps)
+plot(xsteps, density_x)
+
+
+hist(x, freq = FALSE)
+lines(xsteps, density_x, col = "red")
+```
+
+# test out the same things with chi-squared or gamma distribution
+
+
+# law of large numbers
+
+```{r}
+N <- 1000
+x <- rnorm(N, 4, 2)
+means_x <- cumsum(x) / (1:N)
+plot(1:N, means_x)
+plot(1:40, means_x[1:40])
+```
+
+
+# central limit theorem
+
+```{r}
+y <- array(rgamma(1000 * 10000, 1), c(1000, 10000))
+hist(y)
+hist(apply(y, 2, mean))
+```
+
+
+# Monte Carlo Integration
+
+```{r}
+
+x <- rgamma(100, 1, 1)
+
+# Computing expectation
+
+mean(x)
+
+# Computing variance
+
+var(x)
+
+# Computing tail probability
+
+sum(x > 3) / length(x)
+
+```
+
+
+
+## Regression Models
+
+```{r}
+N <- 100
+beta <- 1
+sigma = 0.8
+
+x <- rnorm(N, 4, 2)
+y <- beta * x + rnorm(N) * sigma
+
+lm_result <- lm(y~x)
+plot(x, y)
+lines(x, lm_result$fitted.values)
+```
+
+
+
+## Clustering Models
+
+```{r}
+N <- 1000
+cluster <- sample(c(1, 2, 3, 4), N, replace = TRUE, prob = c(0.1, 0.2, 0.1, 0.6))
+mu <- c(1, 2, 3, 4)
+sigma <- rep(0.1, 4)
+y <- rnorm(N) * sigma[cluster] + mu[cluster]
+hist(y, 50)
+```
+
+
+
+
+## QUIZ game
+
+```{r}
+
+probquiz <- runif(1)
+#probquiz <- sample(0.1*(1:6), 1, replace = TRUE, prob = rep(1, 6))
+B <- rbinom(n = 1, size = 1, prob = probquiz)
+print(list(as.integer(B), probquiz))
+
+```
+# Exercise: if we have 26 lectures during the semester, what is the expected number of quizzes? What is the corresponding standard deviation? 
+```{r}
+quizzz <- rbinom(1000, 26, 0.5)
+quizzz
+mean(quizzz)
+var(quizzz)
+```
+
+# Exercise: can you verify the results above theoretically?
+
+
+
+
+

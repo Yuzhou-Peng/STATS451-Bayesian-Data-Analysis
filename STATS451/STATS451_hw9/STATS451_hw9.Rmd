@@ -1,0 +1,196 @@
+---
+title: "STATS 451 Homework 9"
+author: "Yuzhou Peng"
+date: "2024-04-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(rstan)
+```
+
+```{r}
+batting <- read.csv("C:\\Users\\Penguin\\Desktop\\BattingAverage.csv")
+```
+
+```{r}
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+```
+
+# Problem 1
+```{r}
+# Total number of pitchers
+sum(batting$PriPos == 'Pitcher')
+
+# Total number of players
+nrow(batting)
+
+# Median of pitchers-at-bat
+pitcher_atbats = batting$AtBats[batting$PriPos == 'Pitcher']
+median(pitcher_atbats)
+
+# Total number of catchers-at-bat
+sum(batting$PriPos == 'Catcher')
+
+
+# Median of catchers-at-bat
+catcher_atbats = batting$AtBats[batting$PriPos == 'Catcher']
+median(catcher_atbats)
+
+#Total number of right fielders
+sum(batting$PriPos == 'Right Field')
+
+# Total number of right fielders-at-bat
+Right_Field = batting$AtBats[batting$PriPos == 'Right Field']
+
+# Total number of the rest players
+sum(batting$PriPos != 'Right Field' & batting$PriPos != 'Pitcher' & batting$PriPos != 'Catcher')
+	
+median(batting$AtBats[batting$PriPos != 'Right Field' & batting$PriPos != 'Pitcher' & batting$PriPos != 'Catcher'])
+```
+
+# Problem 2
+```{r}
+sum(batting$AtBats[batting$PriPos == 'Pitcher'])
+sum(batting$AtBats[batting$PriPos == 'Catcher'])
+```
+
+Pitchers have lower chance of batting then catcher
+
+# Problem 3
+```{r}
+
+batting <- batting[, colnames(batting) %in% c("Player", "PriPos", "Hits", "AtBats")]
+stan_data = list(Nsubj = 948, Ncat = 9, N = batting$AtBats, y = batting$Hits, c = as.numeric(factor(batting$PriPos)))
+
+
+``` 
+
+# Problem 4
+
+The stan model code is stored in file "batting_average_model.stan".  
+ 
+
+
+# Problem 5 Run 10000 iterations in total
+```{r}
+batting_fit_1 <- stan(file = 'batting_average_model.stan', data = stan_data, 
+            iter = 10000, chains = 1, core = 4)
+```
+
+```{r}
+print(batting_fit_1, pars = "theta")
+
+```
+
+The effective sample sizes `n_eff` of theta[i] vary from 4000 to more than 13000.  
+
+# Problem 6 Run 32000 iterations to obtain at least 10000 effective sample size
+```{r}
+batting_fit_2 <- stan(file = 'batting_average_model.stan', data = stan_data, 
+            iter = 8000, chains = 4, core = 4)
+```
+
+```{r}
+print(batting_fit_2, pars = "theta")
+```
+
+Among the first key parameters, the smallest `n_eff` comes from theta[76] which is still larger than 10000.  
+
+# Problem 7
+```{r}
+print(batting_fit_2, pars = "theta")
+```
+Can only show the first 100 theta.
+
+# Problem 8
+```{r}
+batting_sample <-  rstan::extract(batting_fit_2)
+batting_sample_theta <- batting_sample$theta
+
+#Visualize theta[2] as example.
+plot(batting_sample_theta[,2], type = "l", ylab = "theta[2]")
+```
+
+The plot of the Marcov chain showed above follows a stationary distribution and mixes well, indicating good convergence.  
+
+```{r}
+# Example of joint distribution of two parameters
+plot(batting_sample_theta[,2], batting_sample_theta[,84], xlim = c(0.1, 0.4), ylim = c(0.1, 0.4), xlab = "theta[2]", ylab = "theta[84]")
+
+# Correlation calculation
+
+cor(batting_sample_theta[,2], batting_sample_theta[,84])
+
+
+```
+
+The sample correlation between theta[2] and theta[84] is 0.01. There are very minor correlation among key parameters.
+
+# Problem 9
+```{r}
+# Choose player 6 and 8
+player_ability_diff <- batting_sample_theta[,8] - batting_sample_theta[,6]
+
+summary(player_ability_diff)
+quantile(player_ability_diff, c(0.025, 0.975))
+
+hist(player_ability_diff, main = "theta[8] - theta[6]", xlab = "difference")
+```
+
+A sample 95% CI suggest that there is enough evidence to claim player 8 has better batting ability than player 6.  
+The mean difference of batting rate is around 0.11
+
+# Problem 10
+```{r}
+# Compare Pitcher and Left Fielder (category 7 and 6)
+# theta[i] is assumed to follow beta(alpha[i], beta[i]), we use the sample mean to approximate true parameters.
+batting_sample_alpha7 <-  mean(batting_sample$alpha[,7])
+batting_sample_alpha6 <-  mean(batting_sample$alpha[,6])
+batting_sample_betac6 <-  mean(batting_sample$beta[,6])
+batting_sample_betac7 <-  mean(batting_sample$beta[,7])
+
+# Draw sample from the two distribution
+
+sample_pitcher <- rbeta(10000, shape1 = batting_sample_alpha7, shape2 = batting_sample_betac7)
+sample_left <- rbeta(10000, shape1 = batting_sample_alpha6, shape2 = batting_sample_betac6)
+position_ability_diff <- sample_left - sample_pitcher
+
+hist(sample_pitcher)
+hist(sample_left)
+hist(position_ability_diff)
+summary(position_ability_diff)
+quantile(position_ability_diff, c(0.025, 0.975))
+```
+
+A sample 95% CI suggest that there is enough evidence to claim Left Fielders have better batting ability Pitchers.  
+The mean difference of batting rate is around 0.12.  
+
+# Problem 11
+```{r}
+batting_fit_modified <- stan(file = 'parameter_modified.stan', data = stan_data, 
+            iter = 2500, chains = 4, core = 4)
+
+print(batting_fit_modified, par= "theta")
+```
+
+The prior parameter-modified model produces very similar results to those produced by non-informative prior model.  
+This indicate the model is not sensitive to selection of A, B, S and  R.   
+
+# Problem 12
+```{r}
+# Analyse player 8 as an example
+
+hist(batting_sample_theta[,8], xlim = c(0, 0.35))
+abline(v=0.1, col="red", lwd=2, lty=2)
+```
+
+The red dotted vertical line is theta[8] estimated MLE.  
+The histogram shows the sample of estimated theta[8], which is shrunk away by hierarchical model.   
+
+

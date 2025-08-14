@@ -1,0 +1,200 @@
+---
+title: "Metropolis2dim"
+output: html_document
+date: "2024-03-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Example: estimating the biases of two coins based on independent coin flips
+
+
+```{r}
+# Define your DATA/Observations
+# this is where you read from your data file and put the data into a vector format
+
+myData1 <- c(rep(0, 10), rep(1, 14)) # COIN 1: 24 flips, and 14 are heads, 10 tails
+myData2 <- c(rep(0, 20), rep(1, 6)) # COIN 2: 26 flips, and 6 heads, 20 tails
+
+```
+
+# Define Likelihood as a function of PARAMETERs (theta)
+
+```{r}
+
+likelihood = function( theta , data1, data2 )  { 
+  
+  # product of two likelihoods from the two coins
+  z = sum( data1 ) # number of head from coin 1
+  N = length( data1 ) # total flips from coin 1
+  z2 = sum( data2 ) # number of head from coin 2
+  N2 = length( data2 ) # total flips from coin 2
+  # can use rbinom
+  pDataGivenTheta = theta[1]^z * (1-theta[1])^(N-z) * theta[2]^z2 * (1-theta[2])^(N2-z2) 
+  
+  # constraints so that the biases of each coin is in the interval (0, 1)
+  pDataGivenTheta[ theta[1] > 1 | theta[1] < 0 ] = 0 
+  pDataGivenTheta[ theta[2] > 1 | theta[2] < 0 ] = 0 
+  return( pDataGivenTheta ) 
+ } 
+ 
+```
+
+# Hint for HW 5: theta_vec = (theta1, theta2, theta3) and theta1+theta2+theta3=1. 
+# theta = (theta1, theta2), and we have theta3=1-theta1-theta2
+
+```{r}
+# define prior
+prior = function( theta )  { 
+  # flat prior, independent for theta1 and theta2
+  pTheta = dbeta( theta[1] , 1 , 1 ) * dbeta( theta[2] , 1 , 1 ) 
+  
+  # constraints
+  pTheta[ theta[1] > 1 | theta[1] < 0 ] = 0 
+  pTheta[ theta[2] > 1 | theta[2] < 0 ] = 0 
+  return( pTheta ) 
+} 
+# Hint for HW5: the dirichlet distribution is a natural extension of the beta distribution for multiparameter settings
+```
+
+
+# Define posterior probability density (up to a normalizing constant)
+# Typically we work on the log-scale
+
+
+```{r}
+ # the posterior ----- the target distribution for MCMC
+
+targetRelProb = function( theta , data1, data2 )  { 
+  targetRelProb =  likelihood( theta , data1, data2 ) * prior( theta ) 
+  return( targetRelProb ) 
+} 
+
+```
+ 
+```{r}
+
+# Specify the length of the trajectory, i.e., the number of jumps to try: 
+trajLength = 50000 # arbitrary large number 
+# Initialize the vector that will store the results/samples of theta1 and theta2: 
+trajectory = array( 0 , c(2, trajLength )) 
+# Specify where to start the trajectory: 
+trajectory[,1] = c(0.01, 0.01)
+# arbitrary value # you can do it in a smarter way
+# Specify the burn-in period: 
+burnIn = ceiling( 0.2 * trajLength ) 
+# arbitrary number, less than trajLength 
+# Initialize accepted, rejected counters, just to monitor performance: 
+nAccepted = 0 
+nRejected = 0 
+ 
+```
+
+```{r}
+# change proposal SD to see how the chain runs and how the result changes 
+proposalSD = rep(c(0.02,0.2,2.0)[2], 2) 
+# CHANGE THIS ACCORDINGLY!!!!!!
+# proposalSD = c(0.1, 0.1)
+
+for ( t in 1:(trajLength-1) )  { 
+
+	currentPosition = trajectory[, t] 
+	# Use the proposal distribution to generate a proposed jump. 
+	proposedJump = rnorm( 2, mean=0 , sd=proposalSD ) 
+	# Compute the probability of accepting the proposed jump. 
+	probAccept = min( 1, 
+		targetRelProb( currentPosition + proposedJump , myData1, myData2 ) 
+		/ targetRelProb( currentPosition , myData1, myData2 ) ) 
+	# Generate a random uniform value from the interval [0,1] to 
+	# decide whether or not to accept the proposed jump. 
+	if ( runif(1) < probAccept )  { 
+		# accept the proposed jump 
+		trajectory[, t+1 ] = currentPosition + proposedJump 
+		# increment the accepted counter, just to monitor performance 
+		if ( t > burnIn )  { nAccepted = nAccepted + 1  } 
+	 } else  { 
+		# reject the proposed jump, stay at current position 
+		trajectory[ ,t+1 ] = currentPosition 
+		# increment the rejected counter, just to monitor performance 
+		if ( t > burnIn )  { nRejected = nRejected + 1  } 
+	 } 
+ } 
+ 
+ 
+ 
+# Extract the post-burnIn portion of the trajectory. 
+acceptedTraj = trajectory[ , (burnIn+1) : dim(trajectory)[2] ] 
+ 
+# End of Metropolis algorithm. 
+ 
+```
+
+#Visualization of Results
+
+```{r}
+
+#----------------------------------------------------------------------- 
+# Display the chain. 
+ 
+#openGraph(width=4,height=8) 
+#layout( matrix(1:2,nrow=2) ) 
+#par(mar=c(3,4,2,1),mgp=c(2,0.7,0)) 
+
+# Trajectory, a.k.a. trace plot, end of chain: 
+idxToPlot = (trajLength-burnIn):trajLength 
+for(k in 1:2) {
+  plot( trajectory[k,idxToPlot] , idxToPlot , main="End of Chain" , 
+        xlab=bquote(theta) , xlim=c(0,1) , ylab="Step in Chain" , 
+        type="o" , pch=20 , col="skyblue" , cex.lab=1.5 ) 
+  # Display proposal SD and acceptance ratio in the plot. 
+  text( 0.0 , trajLength , adj=c(0.0,1.1) , cex=1.75 , 
+        labels = bquote( frac(N[acc],N[pro]) ==  
+                           .(signif( nAccepted/(nAccepted+nRejected) , 3 )))) 
+}
+
+# Trajectory, a.k.a. trace plot, beginning of chain: 
+idxToPlot = 1:100 
+for(k in 1:2) 
+plot( trajectory[k, idxToPlot] , idxToPlot , main="Beginning of Chain" , 
+      xlab=bquote(theta) , xlim=c(0,1) , ylab="Step in Chain" , 
+      type="o" , pch=20 , col="skyblue" , cex.lab=1.5 ) 
+# Indicate burn in limit (might not be visible if not in range): 
+if ( burnIn > 0 )  { 
+  abline(h=burnIn,lty="dotted") 
+  text( 0.5 , burnIn+1 , "Burn In" , adj=c(0.5,1.1) ) 
+ } 
+ 
+idxToPlot = (trajLength-burnIn):trajLength 
+for(k in 1:2) {
+  # samples from Metropolis algorithm
+  hist(trajectory[k, idxToPlot], freq = FALSE, xlab = '', main = 'Metropolis Sampling', xlim = c(0, 1)) 
+  # iid sample based on analytical solution (Beta-Binomial model)
+  if(k == 1){
+    hist(rbeta(1000, sum(myData1) + 1, sum(1-myData1) + 1), xlab = '', freq = FALSE, main = 'Analytical Solution', xlim = c(0, 1))
+  }
+  if(k == 2){
+    hist(rbeta(1000, sum(myData2) + 1, sum(1-myData2) + 1), xlab = '', freq = FALSE, main = 'Analytical Solution', xlim = c(0, 1))
+  }
+}
+
+
+plot.new()
+layout( matrix(1,nrow=1) ) 
+
+# the beginning of the trajectory
+idxBegin <- 1:100
+plot(trajectory[1, idxBegin], trajectory[2, idxBegin], 
+     xlab = expression(theta[1]), ylab = expression(theta[2]), 
+     main = "Metropolis Trajectory")
+lines(trajectory[1, idxBegin], trajectory[2, idxBegin]) 
+
+# after converging
+idxSimple <- seq(idxToPlot[1], idxToPlot[length(idxToPlot)], length.out = 100)
+plot(trajectory[1, idxSimple], trajectory[2, idxSimple], 
+     xlab = expression(theta[1]), ylab = expression(theta[2]), 
+     main = "Metropolis Trajectory")
+lines(trajectory[1, idxSimple], trajectory[2, idxSimple]) 
+
+```
+ 

@@ -1,0 +1,570 @@
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rstan)
+```
+
+
+# data construction
+```{r}
+data = read.csv("state_brith_rate.csv")
+data <- data[, colnames(data) %in% c("GEOID", "Births", "year", "Population")]
+
+data_2016 = data[data$year == 2016, ]
+data_2015 = data[data$year == 2015, ]
+data_2014 = data[data$year == 2014, ]
+data_2013 = data[data$year == 2013, ]
+data_2012 = data[data$year == 2012, ]
+data_2011 = data[data$year == 2011, ]
+
+stan_data_2016 = list(n_subj = nrow(data_2016), n_cat = 50, N = data_2016$Population, z = data_2016$Births * 10, c = as.numeric(factor(data_2016$GEOID)))
+
+stan_data_2011 = list(n_subj = nrow(data_2011), n_cat = 50, N = data_2011$Population, z = data_2011$Births * 10, c = as.numeric(factor(data_2011$GEOID)))
+
+stan_data_2012 = list(n_subj = nrow(data_2012), n_cat = 50, N = data_2012$Population, z = data_2012$Births * 10, c = as.numeric(factor(data_2012$GEOID)))
+
+stan_data_2013 = list(n_subj = nrow(data_2013), n_cat = 50, N = data_2013$Population, z = data_2013$Births * 10, c = as.numeric(factor(data_2013$GEOID)))
+
+stan_data_2014 = list(n_subj = nrow(data_2014), n_cat = 50, N = data_2014$Population, z = data_2014$Births * 10, c = as.numeric(factor(data_2014$GEOID)))
+
+stan_data_2015 = list(n_subj = nrow(data_2015), n_cat = 50, N = data_2015$Population, z = data_2015$Births * 10, c = as.numeric(factor(data_2015$GEOID)))
+```
+
+# Single Year Model Non-informative prior for first year 2011
+```{r}
+model_2011 = "data {
+  int<lower=1> n_subj;
+  int<lower=1> n_cat;
+  int<lower=0> z[n_subj];
+  int<lower=0> c[n_subj];
+  int<lower=0> N[n_subj];
+}
+parameters {
+  real<lower=0, upper=1> lambda[n_subj]; // birth rate of each county
+  real<lower=0, upper=1> omega[n_cat];   // group parameter
+  real<lower=0> kappa_minus_two[n_cat]; // group concentration minus two
+  real<lower=0> kappa_minus_two0; //hyper parameter
+  real<lower=0,upper=1> omega0; // hyper parameter
+}
+transformed parameters {
+  real<lower = 1> alpha0;
+  real<lower = 1> beta0;
+  real<lower = 1> alpha[n_cat];
+  real<lower = 1> beta[n_cat];
+  
+  alpha0 = omega0 * kappa_minus_two0 + 1;
+  beta0 = (1-omega0) * kappa_minus_two0 + 1;
+  
+  for (i in 1:n_cat){
+    alpha[i] = omega[i] * kappa_minus_two[i] + 1;
+    beta[i] = (1-omega[i]) * kappa_minus_two[i] + 1;
+  }
+}
+
+model {
+  omega0 ~ beta(1.0, 1.0);  
+
+  kappa_minus_two0 ~ gamma(0.01, 0.01); 
+
+  for (j in 1:n_cat){
+    omega[j] ~ beta(beta0, alpha0);  
+    kappa_minus_two[j] ~ gamma(0.01, 0.01);
+  }
+  
+  for (i in 1:n_subj){
+    lambda[i] ~ beta(alpha[c[i]], beta[c[i]]);
+  }
+  
+  for (k in 1:n_subj){
+    z[k] ~ poisson(N[k]*lambda[k]);
+  } 
+}
+
+"
+sm_2011 <- stan_model(model_code = model_2011)
+```
+
+```{r}
+warmup = 1000
+fit_2011 <- sampling(sm_2011, data = stan_data_2011, iter = 2000, chains = 8,warmup = 500, cores = 8)
+```
+# 2011 Model
+```{r}
+print(fit_2011, pars = paste0("lambda[", 1:70, "]"), digit = 4)
+print(fit_2011, pars = 'omega', digit = 4)
+plot(fit_2011)
+```
+
+
+
+# Extract from fit_2011 and estimate prior for 2012
+```{r}
+sample_2011 = rstan::extract(fit_2011)
+
+omega0_2011_mean <- mean(sample_2011$omega0)
+omega0_2011_var <- var(sample_2011$omega0)
+kappa_minus2_2011_mean <- mean(sample_2011$kappa_minus_two0)
+kappa_minus2_2011_var <- var(sample_2011$kappa_minus_two0)
+
+A_2012 <- omega0_2011_mean*((omega0_2011_mean*(1-omega0_2011_mean)/omega0_2011_var) - 1)
+B_2012 <- (1-omega0_2011_mean)*((omega0_2011_mean*(1-omega0_2011_mean)/omega0_2011_var) - 1)
+
+S_2012 <- ((kappa_minus2_2011_mean)^2)/kappa_minus2_2011_var
+R_2012 <- ((kappa_minus2_2011_mean))/kappa_minus2_2011_var
+```
+
+# Update stan_data_2012
+```{r}
+stan_data_2012 = list(n_subj = nrow(data_2012), n_cat = 50, N = data_2012$Population, z = data_2012$Births * 10, c = as.numeric(factor(data_2012$GEOID)), A = A_2012, B = B_2012, S = S_2012, R = R_2012)
+```
+
+# Update stan model code
+```{r}
+model_year_progression = "data {
+  int<lower=1> n_subj;
+  int<lower=1> n_cat;
+  int<lower=0> z[n_subj];
+  int<lower=0> c[n_subj];
+  int<lower=0> N[n_subj];
+  real<lower=0> A;
+  real<lower=0> B;
+  real<lower=0> S;
+  real<lower=0> R;
+}
+parameters {
+  real<lower=0, upper=1> lambda[n_subj]; // birth rate of each county
+  real<lower=0, upper=1> omega[n_cat];   // group parameter
+  real<lower=0> kappa_minus_two[n_cat]; // group concentration minus two
+  real<lower=0> kappa_minus_two0; //hyper parameter
+  real<lower=0,upper=1> omega0; // hyper parameter
+}
+transformed parameters {
+  real<lower = 1> alpha0;
+  real<lower = 1> beta0;
+  real<lower = 1> alpha[n_cat];
+  real<lower = 1> beta[n_cat];
+  
+  alpha0 = omega0 * kappa_minus_two0 + 1;
+  beta0 = (1-omega0) * kappa_minus_two0 + 1;
+  
+  for (i in 1:n_cat){
+    alpha[i] = omega[i] * kappa_minus_two[i] + 1;
+    beta[i] = (1-omega[i]) * kappa_minus_two[i] + 1;
+  }
+}
+
+model {
+  omega0 ~ beta(A, B);  
+
+  kappa_minus_two0 ~ gamma(S, R); 
+
+  for (j in 1:n_cat){
+    omega[j] ~ beta(beta0, alpha0);  
+    kappa_minus_two[j] ~ gamma(S, R);
+  }
+  
+  for (i in 1:n_subj){
+    lambda[i] ~ beta(alpha[c[i]], beta[c[i]]);
+  }
+  
+  for (k in 1:n_subj){
+    z[k] ~ poisson(N[k]*lambda[k]);
+  } 
+}
+
+"
+sm_year_progression <- stan_model(model_code = model_year_progression)
+
+```
+
+```{r}
+warmup = 1000
+fit_2012 <- sampling(sm_year_progression, data = stan_data_2012, iter = 2000, chains = 8,warmup = 500, cores = 8)
+```
+
+```{r}
+print(fit_2012, pars = paste0("lambda[", 1:70, "]"), digit = 4)
+print(fit_2012, pars = 'omega', digit = 4)
+plot(fit_2012)
+```
+
+# Repeat similar procedure for 2013
+```{r}
+
+sample_2012 = rstan::extract(fit_2012)
+
+omega0_2012_mean <- mean(sample_2012$omega0)
+omega0_2012_var <- var(sample_2012$omega0)
+kappa_minus2_2012_mean <- mean(sample_2012$kappa_minus_two0)
+kappa_minus2_2012_var <- var(sample_2012$kappa_minus_two0)
+
+A_2013 <- omega0_2012_mean*((omega0_2012_mean*(1-omega0_2012_mean)/omega0_2012_var) - 1)
+B_2013 <- (1-omega0_2012_mean)*((omega0_2012_mean*(1-omega0_2012_mean)/omega0_2012_var) - 1)
+
+S_2013 <- ((kappa_minus2_2012_mean)^2)/kappa_minus2_2012_var
+R_2013 <- ((kappa_minus2_2012_mean))/kappa_minus2_2012_var
+```
+
+```{r}
+stan_data_2013 = list(n_subj = nrow(data_2013), n_cat = 50, N = data_2013$Population, z = data_2013$Births * 10, c = as.numeric(factor(data_2013$GEOID)), A = A_2013, B = B_2013, S = S_2013, R = R_2013)
+
+```
+
+```{r}
+warmup = 1000
+fit_2013 <- sampling(sm_year_progression, data = stan_data_2013, iter = 2000, chains = 8,warmup = 500, cores = 8)
+```
+
+```{r}
+print(fit_2013, pars = paste0("lambda[", 1:70, "]"), digit = 4)
+print(fit_2013, pars = 'omega', digit = 4)
+plot(fit_2013)
+```
+
+# Repeat similar procedure for 2014
+```{r}
+
+sample_2013 = rstan::extract(fit_2013)
+
+omega0_2013_mean <- mean(sample_2013$omega0)
+omega0_2013_var <- var(sample_2013$omega0)
+kappa_minus2_2013_mean <- mean(sample_2013$kappa_minus_two0)
+kappa_minus2_2013_var <- var(sample_2013$kappa_minus_two0)
+
+A_2014 <- omega0_2013_mean*((omega0_2013_mean*(1-omega0_2013_mean)/omega0_2013_var) - 1)
+B_2014 <- (1-omega0_2013_mean)*((omega0_2013_mean*(1-omega0_2013_mean)/omega0_2013_var) - 1)
+
+S_2014 <- ((kappa_minus2_2013_mean)^2)/kappa_minus2_2013_var
+R_2014 <- ((kappa_minus2_2013_mean))/kappa_minus2_2013_var
+```
+
+```{r}
+stan_data_2014 = list(n_subj = nrow(data_2014), n_cat = 50, N = data_2014$Population, z = data_2014$Births * 10, c = as.numeric(factor(data_2014$GEOID)), A = A_2014, B = B_2014, S = S_2014, R = R_2014)
+
+```
+
+```{r}
+warmup = 1000
+fit_2014 <- sampling(sm_year_progression, data = stan_data_2014, iter = 2000, chains = 8,warmup = 500, cores = 8)
+```
+
+```{r}
+print(fit_2014, pars = paste0("lambda[", 1:70, "]"), digit = 4)
+print(fit_2014, pars = 'omega', digit = 4)
+plot(fit_2014)
+```
+
+# Repeat similar procedure for 2015
+```{r}
+
+sample_2014 = rstan::extract(fit_2014)
+
+omega0_2014_mean <- mean(sample_2014$omega0)
+omega0_2014_var <- var(sample_2014$omega0)
+kappa_minus2_2014_mean <- mean(sample_2014$kappa_minus_two0)
+kappa_minus2_2014_var <- var(sample_2014$kappa_minus_two0)
+
+A_2015 <- omega0_2014_mean*((omega0_2014_mean*(1-omega0_2014_mean)/omega0_2014_var) - 1)
+B_2015 <- (1-omega0_2014_mean)*((omega0_2014_mean*(1-omega0_2014_mean)/omega0_2014_var) - 1)
+
+S_2015 <- ((kappa_minus2_2014_mean)^2)/kappa_minus2_2014_var
+R_2015 <- ((kappa_minus2_2014_mean))/kappa_minus2_2014_var
+```
+
+```{r}
+stan_data_2015 = list(n_subj = nrow(data_2015), n_cat = 50, N = data_2015$Population, z = data_2015$Births * 10, c = as.numeric(factor(data_2015$GEOID)), A = A_2015, B = B_2015, S = S_2015, R = R_2015)
+
+```
+
+```{r}
+
+warmup = 1000
+fit_2015 <- sampling(sm_year_progression, data = stan_data_2015, iter = 2000, chains = 8,warmup = 500, cores = 8)
+```
+
+```{r}
+print(fit_2015, pars = paste0("lambda[", 1:70, "]"), digit = 4)
+print(fit_2015, pars = 'omega', digit = 4)
+plot(fit_2015)
+```
+
+# Repeat similar procedure for 2016
+```{r}
+
+sample_2015 = rstan::extract(fit_2015)
+
+omega0_2015_mean <- mean(sample_2015$omega0)
+omega0_2015_var <- var(sample_2015$omega0)
+kappa_minus2_2015_mean <- mean(sample_2015$kappa_minus_two0)
+kappa_minus2_2015_var <- var(sample_2015$kappa_minus_two0)
+
+A_2016 <- omega0_2015_mean*((omega0_2015_mean*(1-omega0_2015_mean)/omega0_2015_var) - 1)
+B_2016 <- (1-omega0_2015_mean)*((omega0_2015_mean*(1-omega0_2014_mean)/omega0_2015_var) - 1)
+
+S_2016 <- ((kappa_minus2_2015_mean)^2)/kappa_minus2_2015_var
+R_2016 <- ((kappa_minus2_2015_mean))/kappa_minus2_2015_var
+```
+
+```{r}
+stan_data_2016 = list(n_subj = nrow(data_2016), n_cat = 50, N = data_2016$Population, z = data_2016$Births * 10, c = as.numeric(factor(data_2016$GEOID)), A = A_2016, B = B_2016, S = S_2016, R = R_2016)
+
+```
+
+```{r}
+start_time_2016 <- Sys.time()
+warmup = 1000
+fit_2016 <- sampling(sm_year_progression, data = stan_data_2016, iter = 2000, chains = 8,warmup = 500, cores = 8)
+end_time_2016 <- Sys.time()
+time_taken_2016 <- round(end_time_2016 - start_time_2016 ,2)
+time_taken_2016
+```
+
+```{r}
+print(fit_2016, pars = paste0("lambda[", 1:70, "]"), digit = 4)
+print(fit_2016, pars = 'omega', digit = 4)
+plot(fit_2016, pars = 'omega')
+```
+
+```{r}
+sample_2016 <- rstan::extract(fit_2016)
+```
+
+```{r}
+par(mfrow = c(1,3))
+
+plot(sample_2016$lambda[,1], type = "l", ylab = "lambda 1", main = "Trace plot of lambda 1 sampling")
+plot(sample_2016$omega[,1], type = "l", ylab = "omega 1", main = "Trace plot of omega 1 sampling")
+plot(sample_2016$kappa_minus_two[,1], type = "l", ylab = "kappa1 - 2", main = "Trace plot of kappa1 - 2 sampling")
+```
+
+# Single Year Model for 2016 for comparison
+```{r}
+
+stan_data_2016_single = list(n_subj = nrow(data_2016), n_cat = 50, N = data_2016$Population, z = data_2016$Births * 10, c = as.numeric(factor(data_2016$GEOID)))
+
+start.time <- Sys.time()
+
+warmup = 1000
+fit_2016_single <- sampling(sm_2011, # model of 2011 has non-informative prior
+                            data = stan_data_2016_single, 
+                            iter = 2000, chains = 8,
+                            warmup = 500, cores = 8)
+end.time <- Sys.time()
+
+time.taken <- round(end.time - start.time,2)
+time.taken
+
+```
+
+```{r}
+print(fit_2016_single, pars = paste0("lambda[", 1:70, "]"), digit = 4)
+print(fit_2016_single, pars = 'omega', digit = 4)
+plot(fit_2016_single, pars = 'omega')
+```
+
+```{r}
+sample_2016_single <- rstan::extract(fit_2016_single)
+```
+
+# Division IDs
+```{r}
+pacific_id <- c(2, 53, 41, 6, 15)
+mountian_id <- c(30, 16, 56, 32, 49, 8, 4, 35)
+west_north_central_id <- c(38, 27, 46, 31, 19, 20, 29)
+west_south_central_id <- c(40, 5, 22, 48)
+east_north_central_id <- c(55, 26, 17, 18, 39)
+east_south_central_id <- c(21, 47, 28, 1)
+south_atlantic_id <- c(54, 24, 10, 11, 51, 37, 45, 13, 12)
+middle_atlantic_id <- c(36, 34, 42)
+new_england_id <- c(23, 50, 33, 25, 9, 44)
+```
+
+# Extract New-England samples from full model
+```{r}
+lambda_new_england_full <- sample_2016_single$lambda[,data_2016$GEOID %in% new_england_id]
+```
+
+# New-England Division Based Model
+```{r}
+data_2016_new_england <- data_2016[data_2016$GEOID %in% new_england_id,]
+
+stan_data_new_england = list(n_subj = nrow(data_2016_new_england), n_cat = length(new_england_id), N = data_2016_new_england$Population, z = data_2016_new_england$Births * 10, c = as.numeric(factor(data_2016_new_england$GEOID)))
+
+```
+
+```{r}
+warmup = 1000
+fit_new_england_2016 <- sampling(sm_2011, data = stan_data_new_england, iter = 1000, chains = 8,warmup = 500, cores = 8)
+```
+
+Comparison between full model and devision-based model
+```{r}
+sample_new_england_2016 = rstan::extract(fit_new_england_2016)
+lambda_new_england_2016 <- sample_new_england_2016$lambda
+
+hist(lambda_new_england_2016[,11] - lambda_new_england_full[,11], xlim = c(-0.01, 0.01), main = "lambda difference between full model and division based model of Cumberland, ME", xlab = "Lambda difference")
+
+print("95% confidence interval of lambda difference")
+quantile(lambda_new_england_2016[,11] - lambda_new_england_full[,11], c(0.025, 0.975))
+```
+
+# Comparison between esitimated birth rate level in different states
+```{r}
+omega_j_sample <- sample_2016$omega
+alpha_j_sample <- sample_2016$alpha
+beta_j_sample <- sample_2016$beta
+
+# Extract parameter for TX
+tx_index <- data_2016$GEOID == 48
+omega_tx_2016 <- omega_j_sample[,stan_data_2016$c[tx_index]][,1]
+alpha_tx_2016 <- alpha_j_sample[,stan_data_2016$c[tx_index]][,1]
+beta_tx_2016 <- beta_j_sample[,stan_data_2016$c[tx_index]][,1]
+tx_mean_2016 <- alpha_tx_2016/(alpha_tx_2016 + beta_tx_2016)
+
+# Extract parameter for CA
+ca_index <- data_2016$GEOID == 6
+omega_ca_2016 <- omega_j_sample[,stan_data_2016$c[ca_index]][,1]
+alpha_ca_2016 <- alpha_j_sample[,stan_data_2016$c[ca_index]][,1]
+beta_ca_2016 <- beta_j_sample[,stan_data_2016$c[ca_index]][,1]
+ca_mean_2016 <- alpha_ca_2016/(alpha_ca_2016 + beta_ca_2016)
+
+# Extract parameter for MA
+ma_index <- data_2016$GEOID == 25
+omega_ma_2016 <- omega_j_sample[,stan_data_2016$c[ma_index]][,1]
+alpha_ma_2016 <- alpha_j_sample[,stan_data_2016$c[ma_index]][,1]
+beta_ma_2016 <- beta_j_sample[,stan_data_2016$c[ma_index]][,1]
+ma_mean_2016 <- alpha_ma_2016/(alpha_ma_2016 + beta_ma_2016)
+
+# Extract parameter for AK
+ak_index <- data_2016$GEOID == 2
+omega_ak_2016 <- omega_j_sample[,stan_data_2016$c[ak_index]]
+
+```
+
+# Difference CI
+```{r}
+omega_diff_tx_ca <- omega_tx_2016 - omega_ca_2016
+omega_diff_tx_ma <- omega_tx_2016 - omega_ma_2016
+omega_diff_ca_ma <- omega_ca_2016 - omega_ma_2016
+
+print("95% confidence interval of Omega difference between TX and CA")
+quantile(omega_diff_tx_ca, c(0.025, 0.975))
+print("95% confidence interval of Omega difference between TX and MA")
+quantile(omega_diff_tx_ma, c(0.025, 0.975))
+print("95% confidence interval of Omega difference between CA and MA")
+quantile(omega_diff_ca_ma, c(0.025, 0.975))
+
+```
+
+```{r}
+tx_true_2016 <- sum(data_2016$Births[tx_index])/sum(data_2016$Population[tx_index])*10
+ca_true_2016 <- sum(data_2016$Births[ca_index])/sum(data_2016$Population[ca_index])*10
+ma_true_2016 <- sum(data_2016$Births[ma_index])/sum(data_2016$Population[ma_index])*10
+ak_true_2016 <- sum(data_2016$Births[ak_index])/sum(data_2016$Population[ak_index])*10
+```
+
+# Differnce Histogram for year progression model
+```{r}
+hist(omega_tx_2016, col = "purple", xlim = c(0.06, 0.17), main = "Histogram of omega for TX, CA and MA from Year Progression Model", xlab = "Birth Rate")
+hist(omega_ca_2016, col = "blue", add = T)
+hist(omega_ma_2016, col = "lightblue", add = T)
+
+abline(v=tx_true_2016, col="red", lwd=2, lty=2)
+abline(v=ca_true_2016, col="red", lwd=2, lty=2)
+abline(v=ma_true_2016, col="red", lwd=2, lty=2)
+legend("topright", legend=c("TX", "CA", "MA"), fill=c("purple", "blue", "lightblue"))
+```
+# Differnce Histogram for single year model
+```{r}
+omega_j_sample_single <- sample_2016_single$omega
+
+
+# Extract parameter for TX
+tx_index <- data_2016$GEOID == 48
+omega_tx_2016_single <- omega_j_sample_single[,stan_data_2016$c[tx_index]][,1]
+
+
+# Extract parameter for CA
+ca_index <- data_2016$GEOID == 6
+omega_ca_2016_single <- omega_j_sample_single[,stan_data_2016$c[ca_index]][,1]
+
+
+# Extract parameter for MA
+ma_index <- data_2016$GEOID == 25
+omega_ma_2016_single <- omega_j_sample_single[,stan_data_2016$c[ma_index]][,1]
+
+```
+
+```{r}
+hist(omega_tx_2016_single, col = "purple", xlim = c(0.06, 0.17), main = "Histogram of omega for TX, CA and MA from Single Year Model", xlab = "Birth Rate")
+hist(omega_ca_2016_single, col = "blue", add = T)
+hist(omega_ma_2016_single, col = "lightblue", add = T)
+
+abline(v=tx_true_2016, col="red", lwd=2, lty=2)
+abline(v=ca_true_2016, col="red", lwd=2, lty=2)
+abline(v=ma_true_2016, col="red", lwd=2, lty=2)
+legend("topright", legend=c("TX", "CA", "MA"), fill=c("purple", "blue", "lightblue"))
+```
+
+# Histogram of sparse state Alaska
+```{r}
+hist(omega_ak_2016, main = "Histogram of omega for Alaska", xlab = "omega")
+abline(v=ak_true_2016, col="red", lwd=2, lty=2)
+```
+
+```{r}
+years <- c(2011, 2012, 2013, 2014, 2015, 2016)
+
+mean_omega_ca_2011 <-  mean(sample_2011$omega[,stan_data_2011$c[ca_index]][,1])
+upper_omega_ca_2011 <- as.numeric(quantile(sample_2011$omega[,stan_data_2011$c[ca_index]][,1], 0.975))
+lower_omega_ca_2011 <- as.numeric(quantile(sample_2011$omega[,stan_data_2011$c[ca_index]][,1], 0.025))
+
+mean_omega_ca_2012 <-  mean(sample_2012$omega[,stan_data_2012$c[ca_index]][,1])
+upper_omega_ca_2012 <- as.numeric(quantile(sample_2012$omega[,stan_data_2012$c[ca_index]][,1], 0.975))
+lower_omega_ca_2012 <- as.numeric(quantile(sample_2012$omega[,stan_data_2012$c[ca_index]][,1], 0.025))
+
+mean_omega_ca_2013 <-  mean(sample_2013$omega[,stan_data_2013$c[ca_index]][,1])
+upper_omega_ca_2013 <- as.numeric(quantile(sample_2013$omega[,stan_data_2013$c[ca_index]][,1], 0.975))
+lower_omega_ca_2013 <- as.numeric(quantile(sample_2013$omega[,stan_data_2013$c[ca_index]][,1], 0.025))
+
+mean_omega_ca_2014 <-  mean(sample_2014$omega[,stan_data_2014$c[ca_index]][,1])
+upper_omega_ca_2014 <- as.numeric(quantile(sample_2014$omega[,stan_data_2014$c[ca_index]][,1], 0.975))
+lower_omega_ca_2014 <- as.numeric(quantile(sample_2014$omega[,stan_data_2014$c[ca_index]][,1], 0.025))
+
+mean_omega_ca_2015 <-  mean(sample_2015$omega[,stan_data_2015$c[ca_index]][,1])
+upper_omega_ca_2015 <- as.numeric(quantile(sample_2015$omega[,stan_data_2015$c[ca_index]][,1], 0.975))
+lower_omega_ca_2015 <- as.numeric(quantile(sample_2015$omega[,stan_data_2015$c[ca_index]][,1], 0.025))
+
+mean_omega_ca_2016 <-  mean(sample_2016$omega[,stan_data_2016$c[ca_index]][,1])
+upper_omega_ca_2016 <- as.numeric(quantile(sample_2016$omega[,stan_data_2016$c[ca_index]][,1], 0.975))
+lower_omega_ca_2016 <- as.numeric(quantile(sample_2016$omega[,stan_data_2016$c[ca_index]][,1], 0.025))
+
+mean_omega_ca_years <- c(mean_omega_ca_2011, mean_omega_ca_2012, mean_omega_ca_2013, mean_omega_ca_2014,mean_omega_ca_2015,mean_omega_ca_2016)
+
+upper_omega_ca_years <- c(upper_omega_ca_2011, upper_omega_ca_2012, upper_omega_ca_2013, upper_omega_ca_2014,upper_omega_ca_2015,upper_omega_ca_2016)
+
+lower_omega_ca_years <- c(lower_omega_ca_2011, lower_omega_ca_2012, lower_omega_ca_2013, lower_omega_ca_2014,lower_omega_ca_2015,lower_omega_ca_2016)
+```
+
+```{r}
+library(ggplot2)
+omega_ca_years <- data.frame(
+  Years <- years,
+  mean <- mean_omega_ca_years,
+  upper <- upper_omega_ca_years,
+  lower <- lower_omega_ca_years
+)
+
+
+plot(years, mean_omega_ca_years, type = "l", ylim = c(0.110, 0.130))
+lines(years, upper_omega_ca_years)
+lines(years, lower_omega_ca_years)
+
+ggplot(data = omega_ca_years, aes(x = Years, y = mean)) +
+  geom_ribbon(aes(ymin=lower, ymax=upper), alpha=.2) +
+  geom_line() +
+  ggtitle("Estimated Birth Rate of CA from 2011 to 2016") +
+  ylab("Birth rates")
+```
+
+
