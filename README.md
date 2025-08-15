@@ -1,0 +1,2 @@
+STATS451 Bayesian Data Analysis is an elective course for students majoring in statistics at University of Michigan, Ann Arbor. The course generally covers the basics of Bayesian inference. This file contains all homework and a final project.
+Most of the coding work is on the MCMC algorithm such as Metropolis and Gibbs samplers. In the final project, I used a packaged called Rstan to better sample the model I designed. There are also coding work in visualization.
